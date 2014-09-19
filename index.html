@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title> WebGL - Game of Life </title>
+  <meta charset="utf-8"/>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <script type="text/javascript" src="main.js"></script>
+</head>
+
+<style>
+  * {
+    margin: 0;
+    padding: 0;
+  }
+  body {
+    height: 100%;
+    width: 100%;
+  }
+
+  .game-of-life-container {
+    position: relative;
+  }
+
+  #game-of-life {
+    display: block;
+    margin: 0 auto;
+    cursor: crosshair;
+  }
+
+  .control-bar {
+    text-align: center;
+    margin: 0 auto;
+  }
+</style>
+
+<body>
+  <div class="game-of-life-container">
+    <canvas id="game-of-life" width="1024" height="512">
+      Your browser doesn't support WebGL
+    </canvas>
+    <script>
+      gameOfLife();
+    </script>
+  </div>
+  <!--
+  <div class="control-bar">
+    <button onclick="width *= 2; height *= 2;"> Zoom in</button>
+    <button onclick="width /= 2; height /= 2;"> Zoom out</button>
+  </div>
+  -->
+</body>
+</html>
