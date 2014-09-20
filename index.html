@@ -46,7 +46,11 @@
     </canvas>
     <div id="fps" style="text-align: center">FPS</div> 
     <script>
-      gameOfLife();
+      //gameOfLife();
+    life = new GameOfLife(1024, 512, 
+        document.getElementById("game-of-life"));
+    life.run();
+    life.fpsElement = document.getElementById("fps");
     </script>
   </div>
   <!--

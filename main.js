@@ -1,71 +1,156 @@
-var gl;
+function GameOfLife(width, height, canvas) {
+    /* Private stuff */
+    var gl;
+    var pendingLive = [];
 
-var width;
-var height;
+    var requestFrame = function() {
+        return window.requestAnimationFrame || 
+            window.webkitRequestAnimationFrame ||
+            window.mozRequestAnimationFrame ||
+            function(callback) {
+                setTimeout(callback, 40);
+            };
+    }();
 
-var textureWidth;
-var textureHeight;
-var textureList = [];
-
-var pendingLive = [];
-
-var outputTexture = 0;
-var sourceTexture = 1;
-
-var requestFrame = function() {
-    return window.requestAnimationFrame || 
-        window.webkitRequestAnimationFrame ||
-        window.mozRequestAnimationFrame ||
-        function(callback) {
-            setTimeout(callback, 40);
+    var getFPS = function() {
+        var thenTime = Date.now() / 1000;
+        var frameHistory = [];
+        var frameIndex = 0;
+        var totalFrameTime= 0;
+        var frameNumber = 60;
+        return function() {
+            var nowTime = Date.now() / 1000;
+            var elapsed = nowTime - thenTime;
+            thenTime = nowTime;
+            totalFrameTime += elapsed - (frameHistory[frameIndex] || 0);
+            frameHistory[frameIndex] = elapsed;
+            frameIndex = (frameIndex + 1) % frameNumber;
+            var averageElasped = totalFrameTime / frameNumber;
+            return 1 / averageElasped;
         };
-}();
+    }();
 
-var getFPS = function() {
-    var thenTime = Date.now() / 1000;
-    var frameHistory = [];
-    var frameIndex = 0;
-    var totalFrameTime= 0;
-    var frameNumber = 60;
-    return function() {
-        var nowTime = Date.now() / 1000;
-        var elapsed = nowTime - thenTime;
-        thenTime = nowTime;
-        totalFrameTime += elapsed - (frameHistory[frameIndex] || 0);
-        frameHistory[frameIndex] = elapsed;
-        frameIndex = (frameIndex + 1) % frameNumber;
-        var averageElasped = totalFrameTime / frameNumber;
-        return 1 / averageElasped;
+    var getText = function(path) {
+        var client = new XMLHttpRequest();
+        client.open('GET', path, false); client.send();
+        if (client.readyState != 4) return null;
+        return client.responseText;
     };
-}();
 
-function toPowerOf2(n) {
-    var ret = 1;
-    while (ret <= n) ret *= 2;
-    return ret;
-}
+    function captureClick(canvas) {
+        function relMouseCoords(currentElement, event){
+            var totalOffsetX = 0;
+            var totalOffsetY = 0;
+            var canvasX = 0;
+            var canvasY = 0;
 
-function gameOfLife() {
-    var canvas = document.getElementById("game-of-life");
-    /* Init context */
+            do {
+                totalOffsetX += currentElement.offsetLeft - currentElement.scrollLeft;
+                totalOffsetY += currentElement.offsetTop - currentElement.scrollTop;
+            } while(currentElement = currentElement.offsetParent)
+
+            canvasX = event.pageX - totalOffsetX;
+            canvasY = event.pageY - totalOffsetY;
+
+            return {x:canvasX, y:canvasY}
+        }
+
+        var holding = false;
+        canvas.addEventListener('mousedown', function(e) {
+            holding = true;
+            pos = relMouseCoords(this, e);
+            pendingLive.push(pos);
+        });
+
+        canvas.addEventListener('mousemove', function(e) {
+            if (!holding) return;
+            pos = relMouseCoords(this, e);
+            pendingLive.push(pos);
+        });
+        canvas.addEventListener('mouseup', function(e) {
+            holding = false;
+        });
+        canvas.addEventListener('touchmove', function(e) {
+            if (!holding) return;
+            pos = relMouseCoords(this, e.touches[0]);
+            pendingLive.push(pos);
+        }, false);
+        canvas.ontouchstart = function(e) {
+            holding = true;
+            return false;
+        }
+        canvas.ontouchend = function(e) {
+            holding = false;
+        }
+    }
+
+    var createProgram = function() {
+        var getShader = function(src, type) {
+            shader = gl.createShader(type);
+            gl.shaderSource(shader, src);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                alert("Can't compile shader: " + gl.getShaderInfoLog(shader));
+                return null;
+            }
+            return shader;
+        }
+        return function(vshader, fshader) {
+            var program = gl.createProgram();
+            vshader = getShader(vshader, gl.VERTEX_SHADER);
+            fshader = getShader(fshader, gl.FRAGMENT_SHADER);
+            if (!vshader || !fshader) return null;
+
+            gl.attachShader(program, vshader);
+            gl.attachShader(program, fshader);
+            gl.linkProgram(program);
+
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                alert("Unable to initialize the shader program.");
+                return null;
+            }
+            return program;
+        };
+    }();
+
+    function Texture(w, h, data) {
+        this.texture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, this.texture);
+        if (!data) data = null;
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 
+                0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+        this.resize = function(width, height) {
+        };
+    }
+
+    /* Public methods */
+    this.width = width;
+    this.height = height;
+    this.resize = function(width, height) {};
+    this.zoom = function(pos, ratio) {};
+    this.run = function() {
+        captureClick(canvas);
+        mainLoop.call(this);
+    }
+
+    /* Main logic */
     try {
         gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
     } catch(e) {}
     if (!gl) return;
-    width = canvas.width;
-    height = canvas.height;
+    var calcProgram = createProgram(getText("vshader.glsl"), getText("calc_fshader.glsl"));
+    var displayProgram = createProgram(getText("vshader.glsl"), getText("display_fshader.glsl"));
 
-    /* Prepare programs */
-    calcProgram = getProgram("vshader.glsl", "calc_fshader.glsl");
-    if (!calcProgram) return;
-    displayProgram = getProgram("vshader.glsl", "display_fshader.glsl");
-    if (!displayProgram) return;
-
-    /* Prepare texture */
-    textureWidth = toPowerOf2(width) / 1.0;
-    textureHeight = toPowerOf2(height) / 1.0;
-    textureList.push(generateTexture());
-    textureList.push(generateTexture());
+    var initData = new Uint8Array(width * height * 4);
+    for (var i = 0; i < initData.length; i+=4) {
+        initData[i+1] = Math.random() > 0.5 ? 255 : 0;
+        initData[i+3] = 255;
+    }
+    var sourceTexture = new Texture(width, height, initData);
+    var outputTexture = new Texture(width, height);
 
     /* Prepare initial data */
     var vertices = [
@@ -76,42 +161,27 @@ function gameOfLife() {
     ];
     buffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
-    // Init vertices data
-    verticesPosition = gl.getAttribLocation(displayProgram, 'vertice_position');
+    gl.bufferData(gl.ARRAY_BUFFER, 
+            new Float32Array(vertices), gl.STATIC_DRAW);
+    verticesPosition = gl.getAttribLocation(displayProgram, 
+            'vertice_position');
     gl.enableVertexAttribArray(verticesPosition);
-    gl.vertexAttribPointer(verticesPosition, 2, gl.FLOAT, false, 0, 0);
-    
-    gl.activeTexture(gl.TEXTURE0);
-    var initImageData = new Uint8Array(textureHeight * textureWidth * 4);
-    for (var i = 0; i < initImageData.length; i+=4) {
-        initImageData[i+0] = 0;
-        initImageData[i+1] = Math.random() > 0.5 ? 255 : 0;
-        initImageData[i+2] = 0;
-        initImageData[i+3] = 255;
-    }
-    gl.bindTexture(gl.TEXTURE_2D, textureList[sourceTexture]);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, textureWidth, textureHeight, 
-            gl.RGBA, gl.UNSIGNED_BYTE, initImageData);
-    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.vertexAttribPointer(verticesPosition, 2, 
+            gl.FLOAT, false, 0, 0);
 
-    // Prepare framebuffer
     var frameBuffer = gl.createFramebuffer();
-
-    captureClick(canvas);
-
-    var fpsElement = document.getElementById("fps");
     var cellWidthLocation = gl.getUniformLocation(calcProgram, "cell_width");
     var cellHeightLocation = gl.getUniformLocation(calcProgram, "cell_height");
     var reviveLocation = gl.getUniformLocation(calcProgram, "revive");
+    gl.activeTexture(gl.TEXTURE0);
+
     var mainLoop = function() {
         gl.clearColor(0.0, 0.0, 0.0, 1.0);
         gl.clear(gl.COLOR_BUFFER_BIT);
         // Calculation program: render-to-texture
         gl.useProgram(calcProgram);
-        // Set some parameter
-        gl.uniform1f(cellWidthLocation, 1.0 / textureWidth);
-        gl.uniform1f(cellHeightLocation, 1.0 / textureHeight);
+        gl.uniform1f(cellWidthLocation, 1.0 / width);
+        gl.uniform1f(cellHeightLocation, 1.0 / height);
 
         var revive = [-1, -1];
         if (pendingLive.length > 0) {
@@ -120,12 +190,11 @@ function gameOfLife() {
         }
         gl.uniform2f(reviveLocation, revive[0], revive[1]);
 
-
         gl.bindFramebuffer(gl.FRAMEBUFFER, frameBuffer);
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, 
-                gl.TEXTURE_2D, textureList[outputTexture], 0);
-        gl.viewport(0, 0, textureWidth, textureHeight);
-        gl.bindTexture(gl.TEXTURE_2D, textureList[sourceTexture]);
+                gl.TEXTURE_2D, outputTexture.texture, 0);
+        gl.viewport(0, 0, width, height);
+        gl.bindTexture(gl.TEXTURE_2D, sourceTexture.texture);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         gl.useProgram(null);
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, 
@@ -134,115 +203,25 @@ function gameOfLife() {
         
         // Display program: render to screen
         gl.useProgram(displayProgram);
-        gl.viewport(0, 0, width, height);
+        gl.viewport(0, 0, canvas.width, canvas.height);
 
-        gl.bindTexture(gl.TEXTURE_2D, textureList[outputTexture]);
+        gl.bindTexture(gl.TEXTURE_2D, outputTexture.texture);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
         gl.bindTexture(gl.TEXTURE_2D, null);
         gl.useProgram(null);
 
-        fpsElement.innerHTML = getFPS().toFixed(0);
+        if (this.fpsElement)
+            this.fpsElement.innerHTML = getFPS().toFixed(0);
 
         // Pint-pong texture
-        sourceTexture = (sourceTexture + 1) % 2;
-        outputTexture = (outputTexture + 1) % 2;
-        requestFrame(mainLoop);
-    }
-    mainLoop();
-}
-
-function captureClick(canvas) {
-    function relMouseCoords(currentElement, event){
-        var totalOffsetX = 0;
-        var totalOffsetY = 0;
-        var canvasX = 0;
-        var canvasY = 0;
-
-        do {
-            totalOffsetX += currentElement.offsetLeft - currentElement.scrollLeft;
-            totalOffsetY += currentElement.offsetTop - currentElement.scrollTop;
-        } while(currentElement = currentElement.offsetParent)
-
-        canvasX = event.pageX - totalOffsetX;
-        canvasY = event.pageY - totalOffsetY;
-
-        return {x:canvasX, y:canvasY}
-    }
-
-    var holding = false;
-    canvas.addEventListener('mousedown', function(e) {
-        holding = true;
-        pos = relMouseCoords(this, e);
-        pendingLive.push(pos);
-    });
-
-    canvas.addEventListener('mousemove', function(e) {
-        if (!holding) return;
-        pos = relMouseCoords(this, e);
-        pendingLive.push(pos);
-    });
-    canvas.addEventListener('mouseup', function(e) {
-        holding = false;
-    });
-    canvas.addEventListener('touchmove', function(e) {
-        if (!holding) return;
-        pos = relMouseCoords(this, e.touches[0]);
-        pendingLive.push(pos);
-    }, false);
-    canvas.ontouchstart = function(e) {
-        holding = true;
-        return false;
-    }
-    canvas.ontouchend = function(e) {
-        holding = false;
+        tmp = outputTexture;
+        outputTexture = sourceTexture;
+        sourceTexture = tmp;
+        var that = this;
+        requestFrame(function() {
+            mainLoop.call(that);
+        });
     }
 }
-
-function generateTexture() {
-    texture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, textureWidth, textureHeight, 
-            0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.bindTexture(gl.TEXTURE_2D, null);
-    return texture;
-}
-
-function getProgram(vshaderPath, fshaderPath) {
-    var getShader = function(fn, type) {
-        shader = gl.createShader(type);
-        gl.shaderSource(shader, getShaderSource(fn));
-        gl.compileShader(shader);
-        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-            alert("Can't compile shader: " + gl.getShaderInfoLog(shader));
-            return null;
-        }
-        return shader;
-    }
-    var getShaderSource = function (fn) {
-        var client = new XMLHttpRequest();
-        client.open('GET', fn, false);
-        client.send();
-        if (client.readyState != 4)
-            return null;
-        return client.responseText;
-    }
-    var program = gl.createProgram();
-    vshader = getShader(vshaderPath, gl.VERTEX_SHADER);
-    fshader = getShader(fshaderPath, gl.FRAGMENT_SHADER);
-    if (!vshader || !fshader) return null;
-
-    gl.attachShader(program, vshader);
-    gl.attachShader(program, fshader);
-    gl.linkProgram(program);
-
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-        alert("Unable to initialize the shader program.");
-        return null;
-    }
-    return program;
-}
-
 
