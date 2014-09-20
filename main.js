@@ -23,11 +23,10 @@ var requestFrame = function() {
 
 var getFPS = function() {
     var thenTime = Date.now() / 1000;
-    var fpsElement = document.getElementById("fps");
     var frameHistory = [];
     var frameIndex = 0;
     var totalFrameTime= 0;
-    var frameNumber = 16;
+    var frameNumber = 60;
     return function() {
         var nowTime = Date.now() / 1000;
         var elapsed = nowTime - thenTime;
@@ -101,23 +100,24 @@ function gameOfLife() {
 
     captureClick(canvas);
 
+    var fpsElement = document.getElementById("fps");
+    var cellWidthLocation = gl.getUniformLocation(calcProgram, "cell_width");
+    var cellHeightLocation = gl.getUniformLocation(calcProgram, "cell_height");
+    var reviveLocation = gl.getUniformLocation(calcProgram, "revive");
     var mainLoop = function() {
         gl.clearColor(0.0, 0.0, 0.0, 1.0);
         gl.clear(gl.COLOR_BUFFER_BIT);
         // Calculation program: render-to-texture
         gl.useProgram(calcProgram);
         // Set some parameter
-        var cellWidthLocation = gl.getUniformLocation(calcProgram, "cell_width");
         gl.uniform1f(cellWidthLocation, 1.0 / textureWidth);
-        var cellHeightLocation = gl.getUniformLocation(calcProgram, "cell_height");
         gl.uniform1f(cellHeightLocation, 1.0 / textureHeight);
 
         var revive = [-1, -1];
         if (pendingLive.length > 0) {
-            pos = pendingLive.pop();
+            pos = pendingLive.shift();
             revive = [pos.x / canvas.width, 1 - pos.y / canvas.height];
         }
-        var reviveLocation = gl.getUniformLocation(calcProgram, "revive");
         gl.uniform2f(reviveLocation, revive[0], revive[1]);
 
 
@@ -141,6 +141,8 @@ function gameOfLife() {
 
         gl.bindTexture(gl.TEXTURE_2D, null);
         gl.useProgram(null);
+
+        fpsElement.innerHTML = getFPS().toFixed(0);
 
         // Pint-pong texture
         sourceTexture = (sourceTexture + 1) % 2;
@@ -178,12 +180,23 @@ function captureClick(canvas) {
     canvas.addEventListener('mousemove', function(e) {
         if (!holding) return;
         pos = relMouseCoords(this, e);
-        console.log(pos);
         pendingLive.push(pos);
     });
     canvas.addEventListener('mouseup', function(e) {
         holding = false;
     });
+    canvas.addEventListener('touchmove', function(e) {
+        if (!holding) return;
+        pos = relMouseCoords(this, e.touches[0]);
+        pendingLive.push(pos);
+    }, false);
+    canvas.ontouchstart = function(e) {
+        holding = true;
+        return false;
+    }
+    canvas.ontouchend = function(e) {
+        holding = false;
+    }
 }
 
 function generateTexture() {
@@ -192,12 +205,30 @@ function generateTexture() {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, textureWidth, textureHeight, 
             0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.bindTexture(gl.TEXTURE_2D, null);
     return texture;
 }
 
 function getProgram(vshaderPath, fshaderPath) {
+    var getShader = function(fn, type) {
+        shader = gl.createShader(type);
+        gl.shaderSource(shader, getShaderSource(fn));
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            alert("Can't compile shader: " + gl.getShaderInfoLog(shader));
+            return null;
+        }
+        return shader;
+    }
+    var getShaderSource = function (fn) {
+        var client = new XMLHttpRequest();
+        client.open('GET', fn, false);
+        client.send();
+        if (client.readyState != 4)
+            return null;
+        return client.responseText;
+    }
     var program = gl.createProgram();
     vshader = getShader(vshaderPath, gl.VERTEX_SHADER);
     fshader = getShader(fshaderPath, gl.FRAGMENT_SHADER);
@@ -214,23 +245,4 @@ function getProgram(vshaderPath, fshaderPath) {
     return program;
 }
 
-function getShader(fn, type) {
-    shader = gl.createShader(type);
-    gl.shaderSource(shader, getShaderSource(fn));
-    gl.compileShader(shader);
-    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-        alert("Can't compile shader: " + gl.getShaderInfoLog(shader));
-        return null;
-    }
-    return shader;
-}
-
-function getShaderSource(fn) {
-    var client = new XMLHttpRequest();
-    client.open('GET', fn, false);
-    client.send();
-    if (client.readyState != 4)
-        return null;
-    return client.responseText;
-}
 
